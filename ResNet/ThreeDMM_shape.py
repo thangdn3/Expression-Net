@@ -1,6 +1,9 @@
-import sys
-#sys.path.append('../kaffe')
-sys.path.append('/home/usc/Desktop/Research/FG18/ExpNet_Code_Release/kaffe/tensorflow')
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir+'/kaffe/tensorflow') 
+# sys.path.append('../kaffe')
+# sys.path.append('/home/usc/Desktop/Research/FG18/ExpNet_Code_Release/kaffe/tensorflow')
 from network_shape import Network_Shape
 
 

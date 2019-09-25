@@ -70,7 +70,7 @@ def projectBackBFM_withExpr(model, features, expr_paras):
 	numVert = S.shape[0]/3
 
 	# (Texture)
-	beta = model.texEV * 0
+	beta = model.texEV
 	for it in range(0, 99):
 		beta[it] = model.texEV[it] * features[it+99]
 	T = np.matmul(model.texPC, beta)
@@ -168,7 +168,7 @@ def write_ply(fname, S, T, faces):
 
 
 
-def write_ply_textureless(fname, S, faces):
+def write_ply_textureless(fname, S, T, faces):
 	nV = S.shape[0]
 	nF = faces.shape[0]
 	f = open(fname,'w')
@@ -178,12 +178,15 @@ def write_ply_textureless(fname, S, faces):
 	f.write('property float x\n')
 	f.write('property float y\n')
 	f.write('property float z\n')
+	f.write('property uchar red\n')
+	f.write('property uchar green\n')
+	f.write('property uchar blue\n')
 	f.write('element face ' + str(nF) + '\n')
 	f.write('property list uchar int vertex_indices\n')
 	f.write('end_header\n')
 
 	for i in range(0,nV):
-		f.write('%0.4f %0.4f %0.4f\n' % (S[i,0],S[i,1],S[i,2]))  
+		f.write('%0.4f %0.4f %0.4f %d %d %d\n' % (S[i,0],S[i,1],S[i,2], int(T[i,0]), int(T[i, 1]), int(T[i, 2])))  
 
 
 	for i in range(0,nF):
