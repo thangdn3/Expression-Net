@@ -180,7 +180,8 @@ def getFaceParams(img):
         
         # Shape + Expression + Pose
         # SEP,TEP = utils.projectBackBFM_withEP(model, Shape_Texture, Expr, Pose)
-        # utils.write_ply_textureless(mesh_folder + '/TEST.ply', SEP, TEP, faces)
+        # utils.write_ply_textureless(mesh_folder + '/TEST.ply', SEP, faces)
+        # utils.write_ply(mesh_folder + '/TEST.ply', SEP, TEP, faces)
         return Shape_Texture, Expr, Pose, faces, model
 
 
