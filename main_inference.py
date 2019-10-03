@@ -26,7 +26,7 @@ tf.logging.set_verbosity(tf.logging.INFO)
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('image_size', 227, 'Image side length.')
 tf.app.flags.DEFINE_integer('num_gpus', 1, 'Number of gpus used for training. (0 or 1)')
-tf.app.flags.DEFINE_integer('batch_size', 1, 'Batch Size')
+# tf.app.flags.DEFINE_integer('batch_size', 1, 'Batch Size') #TODO test batch inference
 
 inputlist = sys.argv[1] # You can try './input.csv' or input your own file
 
@@ -96,7 +96,11 @@ def preProcessImage(im, bbox_dict): #cv2 image (bgr)
 import face_recognition
 def getFaceBBox(img):
     rgb_img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_img)[0] # (top, right, bottom, left)
+    try:
+        face_locations = face_recognition.face_locations(rgb_img)[0] # (top, right, bottom, left)
+    except Exception as e:
+        print('Not detect bbox in this image')
+        return None
     y, x2, y2, x = face_locations
     return {'x': int(x), 'y': int(y), 'width': int(x2)-int(x), 'height': int(y2)-int(y)}
 
@@ -175,10 +179,9 @@ def getFaceParams(img):
         #utils.write_ply_textureless(outFile + '_Shape_and_Expr.ply', SE, faces)
         
         # Shape + Expression + Pose
-        SEP,TEP = utils.projectBackBFM_withEP(model, Shape_Texture, Expr, Pose)
+        # SEP,TEP = utils.projectBackBFM_withEP(model, Shape_Texture, Expr, Pose)
         # utils.write_ply_textureless(mesh_folder + '/TEST.ply', SEP, TEP, faces)
-        output_ply = getPlyFile(SEP, TEP, faces)
-        print(output_ply)
+        return Shape_Texture, Expr, Pose, faces, model
 
 
 def getPoseNet(input_placeholder):
@@ -400,9 +403,217 @@ def saveMergeModel():
                                             "Expr"             :fc1le,
                                             "Pose"             :pose_model.preds_unNormalized})
 
+import pickle
+from tqdm import tqdm
+#Shape_Texture: (198,) -3.07:3.03, Expr: (29,) -1.28:0.68, Pose: (6,) -1.51:2542.07
+def prepare_distill_dataset(list_path='DistillModel/data/test_list.txt'):
+    list_name = os.path.basename(list_path)
+    cur_dir = list_path[:-len(list_name)]
+    output_dir = cur_dir+'label'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    text_file = open(list_path, "r")
+    lines = text_file.read().split('\n')
+    text_file.close()
+
+
+    skip_list = []
+    init_op = tf.global_variables_initializer()
+    ## Modifed Basel Face Model
+    BFM_path = './Shape_Model/BaselFaceModel_mod.mat'
+    model, faces = getBaselModel(BFM_path)
+
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+        sess.run(init_op)
+        tf.saved_model.loader.load(sess, [tf.saved_model.tag_constants.SERVING], './merge_model')
+        
+
+        for i in tqdm(range(len(lines))):
+            p = lines[i]
+            if p == '': continue
+            img_path = cur_dir+list_name[:-9]+'/'+p
+            img = cv2.imread(img_path)
+        
+
+
+            bbox_dict = getFaceBBox(img)
+            if bbox_dict is None:
+                skip_list.append(p)
+                continue
+            
+            preprocessed_img = preProcessImage(img, bbox_dict)
+            # Fix the grey image                                                                                                                       
+            if len(preprocessed_img.shape) < 3:
+                image_r = np.reshape(preprocessed_img, (preprocessed_img.shape[0], preprocessed_img.shape[1], 1))
+                image = np.append(image_r, image_r, axis=2)
+                image = np.append(image, image_r, axis=2)
+            else:
+                image = preprocessed_img
+
+            image = np.reshape(image, [1, FLAGS.image_size, FLAGS.image_size, 3])
+            # use saved_model_cli tool on savedmodel to get input/output name
+            (Shape_Texture, Expr, Pose) = sess.run(['shapeCNN/shapeCNN_fc1/BiasAdd:0','exprCNN/exprCNN_fc1/BiasAdd:0','costs/add:0'], feed_dict={'Placeholder:0': image})
+            
+            Pose = np.reshape(Pose, [-1])
+            Shape_Texture = np.reshape(Shape_Texture, [-1])
+            Shape = Shape_Texture
+        #     Shape = Shape_Texture[0:99]
+            Shape = np.reshape(Shape, [-1])
+            Expr = np.reshape(Expr, [-1])
+
+
+
+            sub_dir = p.split('/')[0]
+            if not os.path.exists(output_dir+'/'+sub_dir):
+                os.makedirs(output_dir+'/'+sub_dir)
+            with open(output_dir + '/' + p[:-3] + 'dict', 'wb') as output_dictionary_file:
+                pickle.dump({'Shape_Texture':Shape_Texture, 'Expr':Expr, 'Pose':Pose}, output_dictionary_file)
+    
+    with open(cur_dir+'skip_list.txt', 'w') as f:
+        for item in skip_list:
+            f.write("%s\n" % item)
+
+def prepare_batch_distill_dataset(list_path='DistillModel/data/train_list.txt', batch_size=128):
+    list_name = os.path.basename(list_path)
+    cur_dir = list_path[:-len(list_name)]
+    output_dir = cur_dir+'label_train'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    text_file = open(list_path, "r")
+    lines = text_file.read().split('\n')
+    text_file.close()
+
+
+    skip_list = []
+    init_op = tf.global_variables_initializer()
+    ## Modifed Basel Face Model
+    BFM_path = './Shape_Model/BaselFaceModel_mod.mat'
+    model, faces = getBaselModel(BFM_path)
+
+    tf.app.flags.DEFINE_integer('batch_size', batch_size, 'Batch Size')
+    x = tf.placeholder(tf.float32, [FLAGS.batch_size, FLAGS.image_size, FLAGS.image_size, 3])
+      
+    pose_model = getPoseNet(x)
+    x2, fc1ls = getShapeCNN(x)
+    fc1le = getExpressionCNN(x2)
+                    
+    # Add ops to save and restore all the variables.                                                                                                                
+    init_op = tf.global_variables_initializer()
+    saver_pose = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='Spatial_Transformer'))
+    saver_ini_shape_net = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='shapeCNN'))
+    saver_ini_expr_net = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='exprCNN'))
+
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+        sess.run(init_op)
+
+        # Load face pose net model from Chang et al.'ICCVW17
+        load_path = "./fpn_new_model/model_0_1.0_1.0_1e-07_1_16000.ckpt"
+        saver_pose.restore(sess, load_path)
+        
+        # load 3dmm shape and texture model from Tran et al.' CVPR2017
+        load_path = "./Shape_Model/ini_ShapeTextureNet_model.ckpt"
+        saver_ini_shape_net.restore(sess, load_path)
+
+        # load our expression net model
+        load_path = "./Expression_Model/ini_exprNet_model.ckpt"
+        saver_ini_expr_net.restore(sess, load_path)
+        
+        for i in tqdm(range(len(lines)//batch_size)):
+            batch_images = None
+            if i!= len(lines)//batch_size-1:
+                size = batch_size
+            else:
+                size = len(lines)%batch_size
+
+            paths=[]
+            for j in range(size):
+                p = lines[i*batch_size+j]
+                if p == '': continue
+                img_path = cur_dir+list_name[:-9]+'/'+p
+                img = cv2.imread(img_path)
+            
+
+
+                bbox_dict = getFaceBBox(img)
+                if bbox_dict is None:
+                    skip_list.append(p)
+                    continue
+                
+                paths.append(p)
+                preprocessed_img = preProcessImage(img, bbox_dict)
+                # Fix the grey image                                                                                                                       
+                if len(preprocessed_img.shape) < 3:
+                    image_r = np.reshape(preprocessed_img, (preprocessed_img.shape[0], preprocessed_img.shape[1], 1))
+                    image = np.append(image_r, image_r, axis=2)
+                    image = np.append(image, image_r, axis=2)
+                else:
+                    image = preprocessed_img
+
+                image = np.reshape(image, [1, FLAGS.image_size, FLAGS.image_size, 3])
+                if batch_images is None:
+                    batch_images = image
+                else:
+                    batch_images = np.vstack((batch_images,image))
+            
+            filled_batch_images = np.zeros((batch_size, FLAGS.image_size, FLAGS.image_size, 3))
+            filled_batch_images[:len(batch_images)]=batch_images
+            # use saved_model_cli tool on savedmodel to get input/output name
+            (Shape_Texture, Expr, Pose) = sess.run([fc1ls, fc1le, pose_model.preds_unNormalized], feed_dict={x: filled_batch_images})
+
+
+            for i,p in enumerate(paths):
+                sub_dir = p.split('/')[0]
+                if not os.path.exists(output_dir+'/'+sub_dir):
+                    os.makedirs(output_dir+'/'+sub_dir)
+                with open(output_dir + '/' + p[:-3] + 'dict', 'wb') as output_dictionary_file:
+                    pickle.dump({'Shape_Texture':Shape_Texture[i], 'Expr':Expr[i], 'Pose':Pose[i]}, output_dictionary_file)
+    
+    with open(cur_dir+'skip_list.txt', 'w') as f:
+        for item in skip_list:
+            f.write("%s\n" % item)
+
+# TODO: put this inside 2 functions above
+def prepare_preprocessed_dataset(list_path='DistillModel/data/train_list.txt', skip_list_path='DistillModel/data/skip_list.txt'):
+    list_name = os.path.basename(list_path)
+    cur_dir = list_path[:-len(list_name)]
+    output_dir = cur_dir+'preprocessed_img_train'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    text_file = open(list_path, "r")
+    full_list = text_file.read().split('\n')
+    text_file.close()
+
+    text_file = open(skip_list_path, "r")
+    skip_list = text_file.read().split('\n')
+    text_file.close()
+
+    detected_list = list(set(full_list)^set(skip_list))
+
+    skip_list2 = []
+    for i in tqdm(range(len(detected_list))):
+        p = detected_list[i]
+        if p == '': continue
+        img_path = cur_dir+list_name[:-9]+'/'+p
+        img = cv2.imread(img_path)
+    
+        bbox_dict = getFaceBBox(img)
+        if bbox_dict is None:
+            skip_list2.append(p)
+            continue
+        preprocessed_img = preProcessImage(img, bbox_dict)
+
+        sub_dir = p.split('/')[0]
+        if not os.path.exists(output_dir+'/'+sub_dir):
+            os.makedirs(output_dir+'/'+sub_dir)
+        base_name = os.path.basename(img_path)
+        cv2.imwrite(output_dir+'/'+sub_dir+'/'+base_name,preprocessed_img)
+    with open(cur_dir+'skip_list2.txt', 'w') as f:
+        for item in skip_list2:
+            f.write("%s\n" % item)
+
 def main(_):
     os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"]="2"
+    os.environ["CUDA_VISIBLE_DEVICES"]="3"
     if FLAGS.num_gpus == 0:
         dev = '/cpu:0'
     elif FLAGS.num_gpus == 1:
@@ -415,12 +626,19 @@ def main(_):
     # with tf.device(dev):
     #     extract_PSE_feats()
 
-    img = cv2.imread('./images/Happy_183_1.jpg')
-    img = np.asarray(img)
-    with tf.device(dev):
-        getFaceParams(img)
-        # saveMergeModel()
+    # img = cv2.imread('./images/Happy_183_1.jpg')
+    # with tf.device(dev):
+        # Shape_Texture, Expr, Pose, faces, model = getFaceParams(img)
+        # SEP,TEP = utils.projectBackBFM_withEP(model, Shape_Texture, Expr, Pose)
+        # output_ply = getPlyFile(SEP, TEP, faces)
+        # print(output_ply)
 
+    # with tf.device(dev):
+        # saveMergeModel()
+        # prepare_batch_distill_dataset(batch_size=512)
+        # prepare_distill_dataset()
+
+    prepare_preprocessed_dataset()
 
 if __name__ == '__main__':
     tf.app.run()

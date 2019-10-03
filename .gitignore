@@ -24,3 +24,9 @@ tmp/
 *.csv
 
 *.pb
+
+*.tflite
+
+DistillModel/data/*
+
+DistillModel/logs/*
