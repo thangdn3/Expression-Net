@@ -355,7 +355,8 @@ def extract_PSE_feats():
                     
                     # Shape + Expression + Pose
                     SEP,TEP = utils.projectBackBFM_withEP(model, Shape_Texture, Expr, Pose)
-                    utils.write_ply_textureless(outFile + '_Shape_Expr_Pose.ply', SEP, TEP, faces)
+                    # utils.write_ply_textureless(outFile + '_Shape_Expr_Pose.ply', SEP, faces)
+                    utils.write_ply(outFile + '_Shape_Expr_Pose.ply', SEP, TEP, faces)
 
 def saveMergeModel():                                                                    
     x = tf.placeholder(tf.float32, [FLAGS.batch_size, FLAGS.image_size, FLAGS.image_size, 3])

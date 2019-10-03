@@ -168,7 +168,7 @@ def write_ply(fname, S, T, faces):
 
 
 
-def write_ply_textureless(fname, S, T, faces):
+def write_ply_textureless(fname, S, faces):
 	nV = S.shape[0]
 	nF = faces.shape[0]
 	f = open(fname,'w')
@@ -186,7 +186,7 @@ def write_ply_textureless(fname, S, T, faces):
 	f.write('end_header\n')
 
 	for i in range(0,nV):
-		f.write('%0.4f %0.4f %0.4f %d %d %d\n' % (S[i,0],S[i,1],S[i,2], int(T[i,0]), int(T[i, 1]), int(T[i, 2])))  
+		f.write('%0.4f %0.4f %0.4f %d %d %d\n' % (S[i,0],S[i,1],S[i,2]))  
 
 
 	for i in range(0,nF):
