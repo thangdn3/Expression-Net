@@ -83,6 +83,58 @@ def projectBackBFM_withExpr(model, features, expr_paras):
 	T = np.reshape(T,(numVert, 3))
 	return S,T
 
+def get_base_S(model):
+    return model.shapeMU + model.expMU
+
+def array_to_binary(a, output_path, dtype='<f8'):
+    with open(output_path, 'wb') as f:
+        a.astype(dtype).tofile(f)
+
+def update_pose_expr(model_expEV, model_expPC, model_shapeEV, model_shapePC, base_S, expr_paras, pose_paras, features):
+    """
+        S.shape = (140970,)
+
+        pose type '>f8' make calculation wrong, convert to float 32
+    """
+    pose_paras=pose_paras.astype(np.float32)
+	
+    alpha = model_shapeEV * 0
+    for it in range(0, 99):
+		alpha[it] = model_shapeEV[it] * features[it]
+    S = np.matmul(model_shapePC, alpha)
+
+	
+	# Expression
+    expr = model_expEV * 0
+    for it in range(0, 29):
+		expr[it] = model_expEV[it] * expr_paras[it]
+    E = np.matmul(model_expPC, expr)
+
+	## Adding back average shape
+    S = S + base_S + E
+    numVert = S.shape[0]/3
+
+	# Pose
+	#PI = np.array([[  2.88000000e+03, 0.00000000e+00, 1.12000000e+02], [0.00000000e+00, 2.88000000e+03, 1.12000000e+02], [0, 0, 1]]);
+    r = pose_paras[0:3]
+    r[1] = -r[1]
+    r[2] = -r[2]
+    t = pose_paras[3:6]
+    t[0] = -t[0]
+	#print r.shape, t.shape
+    R, jacobian = cv2.Rodrigues(r, None)
+	#print R
+
+    S = np.reshape(S,(numVert,3))
+	#print S.shape
+    S_RT = np.matmul(R, np.transpose(S)) + np.reshape(t, [3,1])
+	#S_RT = np.matmul(PI, S_RT)
+    S_RT = np.transpose(S_RT)
+
+	## Final Saving for visualization
+    S = np.reshape(S_RT,(numVert,3))
+
+    return S, {"S_RT":S_RT,"numVert":numVert,"R":R,"r":r,"t":t,"E":E,"expr":expr,"alpha":alpha}
 
 def projectBackBFM_withEP(model, features, expr_paras, pose_paras):
 	alpha = model.shapeEV * 0
@@ -133,7 +185,7 @@ def projectBackBFM_withEP(model, features, expr_paras, pose_paras):
 	T = np.reshape(T,(numVert, 3))
 
 
-	return S,T
+	return S,T,{"S_RT":S_RT,"numVert":numVert,"R":R,"r":r,"t":t,"E":E,"expr":expr,"alpha":alpha}
 
 def truncateUint8(val):
 	if val < 0:

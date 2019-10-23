@@ -16,8 +16,8 @@ def increaseBbox(bbox, factor):
     dw = 1 + factor
     dh = 1 + factor
     #Getting bbox height and width
-    w = brx-tlx;
-    h = bry-tly;
+    w = brx-tlx
+    h = bry-tly
     tlx2 = tlx - w * dx
     tly2 = tly - h * dy
     brx2 = tlx + w * dw

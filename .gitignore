@@ -30,3 +30,11 @@ tmp/
 DistillModel/data/*
 
 DistillModel/logs/*
+
+*.hdf5
+
+*.bin
+
+*.h5
+
+*.caffemodel
